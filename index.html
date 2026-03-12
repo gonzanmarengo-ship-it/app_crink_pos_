@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CRINK POS</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@500;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Dexie.js for IndexedDB -->
+    <script src="https://unpkg.com/dexie@3.2.4/dist/dexie.js"></script>
+    
+    <!-- SheetJS for Excel Export -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="styles.css">
+    
+    <script src="js/db.js" defer></script>
+    <script src="js/app.js" defer></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <nav class="sidebar">
+            <div class="logo">
+                <h1>CRINK<span>POS</span></h1>
+            </div>
+            <ul class="nav-links">
+                <li><button class="nav-btn active" data-target="pos-view">💳 POS</button></li>
+                <li><button class="nav-btn" data-target="admin-view">⚙️ Administración</button></li>
+                <li><button class="nav-btn" data-target="history-view">📊 Historial</button></li>
+            </ul>
+            <div class="event-status" id="nav-event-status">
+                <span class="status-indicator offline"></span> Sin Evento Activo
+            </div>
+        </nav>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            
+            <!-- POS View -->
+            <section id="pos-view" class="view active">
+                <div class="pos-layout">
+                    <div class="products-panel">
+                        <div class="products-grid" id="pos-products-grid">
+                            <!-- Productos inyectados dinámicamente -->
+                        </div>
+                    </div>
+                    <div class="cart-panel">
+                        <h2>Ticket Actual</h2>
+                        <div class="cart-items" id="cart-items">
+                            <!-- Items inyectados dinámicamente -->
+                        </div>
+                        <div class="cart-summary">
+                            <div class="summary-row">
+                                <span>Subtotal</span>
+                                <span id="cart-subtotal">$0</span>
+                            </div>
+                        </div>
+                        <button class="pay-btn" id="btn-pay" disabled>COBRAR</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Admin View -->
+            <section id="admin-view" class="view">
+                <div class="admin-layout">
+                    <h2>Administración</h2>
+                    <div class="admin-tabs">
+                        <button class="tab-btn active" data-tab="admin-events">Eventos</button>
+                        <button class="tab-btn" data-tab="admin-products">Productos</button>
+                        <button class="tab-btn" data-tab="admin-bebidas">Bebidas</button>
+                        <button class="tab-btn" data-tab="admin-config">Configuración</button>
+                    </div>
+
+                    <!-- Events Tab -->
+                    <div id="admin-events" class="tab-content active">
+                        <div class="tab-header">
+                            <h3>Gestión de Eventos</h3>
+                            <button class="btn-primary" id="btn-new-event">+ Nuevo Evento</button>
+                        </div>
+                        <div class="events-list" id="events-list"></div>
+                    </div>
+
+                    <!-- Products Tab -->
+                    <div id="admin-products" class="tab-content">
+                        <div class="tab-header">
+                            <h3>Catálogo de Productos</h3>
+                            <button class="btn-primary" id="btn-new-product">+ Nuevo Producto</button>
+                        </div>
+                        <div class="products-list" id="products-list"></div>
+                    </div>
+
+                    <!-- Bebidas Tab -->
+                    <div id="admin-bebidas" class="tab-content">
+                        <div class="tab-header">
+                            <h3>Gestión de Bebidas</h3>
+                            <button class="btn-primary" id="btn-new-bebida">+ Nueva Bebida</button>
+                        </div>
+                        <div class="bebidas-list" id="bebidas-list"></div>
+                    </div>
+
+                    <!-- Config Tab -->
+                    <div id="admin-config" class="tab-content">
+                        <h3>Configuración del Sistema</h3>
+                        <form id="config-form" class="admin-form">
+                            <div class="form-group">
+                                <label for="config-business-name">Nombre del Negocio</label>
+                                <input type="text" id="config-business-name" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="config-posnet-fee">Comisión Posnet (%)</label>
+                                <input type="number" step="0.1" id="config-posnet-fee" required>
+                            </div>
+                            <button type="submit" class="btn-success">Guardar Configuración</button>
+                        </form>
+                    </div>
+                </div>
+            </section>
+
+            <!-- History View -->
+            <section id="history-view" class="view">
+                <div class="history-layout">
+                    <h2>Historial y Reportes</h2>
+                    <div class="history-actions">
+                        <select id="history-event-select" class="form-select">
+                            <option value="">Seleccione un evento</option>
+                        </select>
+                        <button class="btn-primary" id="btn-export-excel" disabled>📥 Exportar a Excel</button>
+                    </div>
+                    <div class="history-stats" id="history-stats">
+                        <!-- Estadisticas -->
+                    </div>
+                    <div class="history-orders" id="history-orders">
+                        <!-- Detalles -->
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- Payment Modal -->
+    <div id="payment-modal" class="modal">
+        <div class="modal-content payment-modal-content">
+            <span class="close-modal" id="close-payment-modal">&times;</span>
+            <h2>Seleccionar Medio de Pago</h2>
+            <div class="payment-total">TOTAL: <strong id="payment-total-amount">$0</strong></div>
+            <div class="payment-methods">
+                <button class="pay-method-btn method-cash" data-method="efectivo">EFECTIVO</button>
+                <button class="pay-method-btn method-transfer" data-method="transferencia">TRANSFERENCIA</button>
+                <button class="pay-method-btn method-posnet" data-method="posnet">POSNET<br><small id="posnet-fee-info"></small></button>
+            </div>
+            <button class="btn-danger" id="cancel-payment">CANCELAR</button>
+        </div>
+    </div>
+
+    <!-- Product Modal -->
+    <div id="product-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" id="close-product-modal">&times;</span>
+            <h2 id="product-modal-title">Nuevo Producto</h2>
+            <form id="product-form" class="admin-form">
+                <input type="hidden" id="prod-id">
+                <div class="form-group">
+                    <label for="prod-nombre">Nombre</label>
+                    <input type="text" id="prod-nombre" required>
+                </div>
+                <div class="form-group">
+                    <label for="prod-categoria">Categoría</label>
+                    <select id="prod-categoria" required>
+                        <option value="Papas">Papas</option>
+                        <option value="Bebidas">Bebidas</option>
+                        <option value="Promos">Promos</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="prod-precio">Precio de Venta ($)</label>
+                        <input type="number" step="0.01" id="prod-precio" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="prod-costo">Costo Unitario ($)</label>
+                        <input type="number" step="0.01" id="prod-costo" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="prod-gramaje">Gramos de papa a descontar</label>
+                    <input type="number" id="prod-gramaje" value="0" required>
+                </div>
+                <div id="prod-bebidas-group" style="display: none;">
+                    <div class="form-group">
+                        <label for="prod-cant-bebidas">Cantidad de Bebidas</label>
+                        <input type="number" id="prod-cant-bebidas" value="1" min="1" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Bebidas Incluidas</label>
+                        <div id="prod-bebidas-checkboxes" class="checkboxes-container" style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 5px;">
+                            <!-- Checkboxes inyectados dinámicamente -->
+                        </div>
+                    </div>
+                </div>
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" id="prod-activo" checked>
+                    <label for="prod-activo">Producto Activo para la venta</label>
+                </div>
+                <button type="submit" class="btn-success">Guardar Producto</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Event Modal -->
+    <div id="event-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" id="close-event-modal">&times;</span>
+            <h2 id="event-modal-title">Nuevo Evento</h2>
+            <form id="event-form" class="admin-form">
+                <input type="hidden" id="ev-id">
+                <div class="form-group">
+                    <label for="ev-nombre">Nombre del Evento</label>
+                    <input type="text" id="ev-nombre" required>
+                </div>
+                <div class="form-group">
+                    <label for="ev-lugar">Lugar</label>
+                    <input type="text" id="ev-lugar">
+                </div>
+                <div class="form-group">
+                    <label for="ev-obs">Observaciones</label>
+                    <textarea id="ev-obs"></textarea>
+                </div>
+                <button type="submit" class="btn-success">Guardar Evento</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Drink Selection Modal -->
+    <div id="drink-selection-modal" class="modal">
+        <div class="modal-content" style="position: relative;">
+            <span class="close-modal" id="close-drink-modal">&times;</span>
+            <h2>Seleccionar Bebida</h2>
+            <div class="payment-methods" id="dynamic-drink-options" style="margin-top: 20px;">
+                <!-- Botones dinamicos generados desde app.js -->
+            </div>
+            <div id="drink-counter" style="position: absolute; bottom: 20px; right: 20px; font-size: 14px; font-weight: bold; color: var(--text-secondary);">
+                0/0
+            </div>
+            <button class="btn-danger" id="cancel-drink-selection" style="margin-top:20px; width: auto; margin-right: 40px;">CANCELAR</button>
+        </div>
+    </div>
+
+    <!-- Cost Modal (Kept for backwards compatibility or global add) -->
+    <div id="cost-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" id="close-cost-modal">&times;</span>
+            <h2 id="cost-modal-title">Agregar Costo al Evento</h2>
+            <form id="cost-form" class="admin-form">
+                <input type="hidden" id="cost-evento-id">
+                <div class="form-group">
+                    <label for="cost-desc">Descripción del Costo</label>
+                    <input type="text" id="cost-desc" required>
+                </div>
+                <div class="form-group">
+                    <label for="cost-monto">Monto ($)</label>
+                    <input type="number" step="0.01" id="cost-monto" required>
+                </div>
+                <button type="submit" class="btn-success">Guardar Costo</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Event Details Modal (Costs) -->
+    <div id="event-details-modal" class="modal">
+        <div class="modal-content" style="max-width: 600px;">
+            <span class="close-modal" id="close-event-details-modal">&times;</span>
+            <h2 id="event-details-title">Detalles del Evento</h2>
+            
+            <div style="margin-top: 20px;">
+                <h3 style="margin-bottom: 10px; border-bottom: 1px solid var(--border); padding-bottom: 5px;">Costos Registrados</h3>
+                <div id="event-costs-list" style="max-height: 200px; overflow-y: auto; margin-bottom: 20px;">
+                    <!-- Costos listados aqui -->
+                </div>
+                <div id="event-costs-total" style="text-align: right; font-weight: bold; font-size: 18px; color: var(--danger); margin-bottom: 20px;">
+                    Total: $0
+                </div>
+            </div>
+
+            <div style="background: var(--bg-card); padding: 15px; border-radius: var(--radius-md);">
+                <h3 style="margin-bottom: 10px;">Agregar Nuevo Costo</h3>
+                <form id="detail-cost-form" class="admin-form">
+                    <input type="hidden" id="detail-cost-evento-id">
+                    <div class="form-row">
+                        <div class="form-group" style="flex: 2;">
+                            <label for="detail-cost-desc">Descripción</label>
+                            <input type="text" id="detail-cost-desc" required>
+                        </div>
+                        <div class="form-group" style="flex: 1;">
+                            <label for="detail-cost-monto">Monto ($)</label>
+                            <input type="number" step="0.01" id="detail-cost-monto" required>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn-success">Guardar Costo</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bebida Modal -->
+    <div id="bebida-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" id="close-bebida-modal">&times;</span>
+            <h2 id="bebida-modal-title">Nueva Bebida</h2>
+            <form id="bebida-form" class="admin-form">
+                <input type="hidden" id="bebida-id">
+                <div class="form-group">
+                    <label for="bebida-nombre">Nombre de la Bebida</label>
+                    <input type="text" id="bebida-nombre" required>
+                </div>
+                <button type="submit" class="btn-success">Guardar Bebida</button>
+            </form>
+        </div>
+    </div>
+
+</body>
+</html>
