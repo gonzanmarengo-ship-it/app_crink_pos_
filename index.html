@@ -18,6 +18,9 @@
 
     <!-- Custom CSS -->
     <link rel="stylesheet" href="styles.css">
+
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#ffffff">
     
     <script src="js/db.js" defer></script>
     <script src="js/app.js" defer></script>
@@ -48,6 +51,14 @@
                     <div class="products-panel">
                         <div class="products-grid" id="pos-products-grid">
                             <!-- Productos inyectados dinámicamente -->
+                        </div>
+                        
+                        <!-- Panel de Últimos 10 Pedidos -->
+                        <div class="recent-orders-section" style="margin-top: 30px; padding-top: 20px; border-top: 1px solid var(--bg-card);">
+                            <h2 style="font-size: 20px; margin-bottom: 15px; color: var(--text-secondary);">Últimos 10 Pedidos Confirmados</h2>
+                            <div id="pos-recent-orders" style="display: flex; flex-direction: column; gap: 10px;">
+                                <!-- Pedidos inyectados dinámicamente -->
+                            </div>
                         </div>
                     </div>
                     <div class="cart-panel">
@@ -323,6 +334,14 @@
             </form>
         </div>
     </div>
-
+<script>
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("./service-worker.js")
+        .then(() => console.log("Service Worker registrado"))
+        .catch((error) => console.log("Error al registrar Service Worker:", error));
+    });
+  }
+</script>
 </body>
 </html>

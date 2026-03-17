@@ -157,6 +157,7 @@ async function loadPOSView() {
     allProducts = await db.producto.where('activo').equals(1).toArray();
     renderPOSProducts();
     renderCart(); // Limpiar rastro de carrito viejo si lo hubiera
+    renderRecentOrders();
 }
 
 function renderPOSProducts() {
@@ -402,6 +403,7 @@ async function processPayment(metodo, totalBruto) {
          // Success
          cart = []; // clear cart
          renderCart();
+         renderRecentOrders(); // Actualizar lista de recientes al procesar
          document.getElementById('payment-modal').classList.remove('active');
          
          // Visual feedback could be added here
@@ -410,6 +412,119 @@ async function processPayment(metodo, totalBruto) {
          console.error("Error validando pedido: ", err);
          alert("Hubo un error al procesar el pago.");
      }
+}
+
+async function renderRecentOrders() {
+    const listContainer = document.getElementById('pos-recent-orders');
+    if (!listContainer) return;
+    if (!currentEvent) {
+        listContainer.innerHTML = '';
+        return;
+    }
+
+    const pedidos = await db.pedido
+        .where('evento_id').equals(currentEvent.id)
+        .reverse()
+        .limit(10)
+        .toArray();
+
+    listContainer.innerHTML = '';
+
+    if (pedidos.length === 0) {
+        listContainer.innerHTML = '<p style="color: var(--text-secondary);">No hay pedidos recientes en este evento.</p>';
+        return;
+    }
+
+    for (let p of pedidos) {
+        const detalles = await db.detalle_pedido.where('pedido_id').equals(p.id).toArray();
+        let desc = detalles.map(d => `${d.cantidad}x ${d.nombre_producto_historico}${d.bebida_elegida ? ` (${d.bebida_elegida})` : ''}`).join(', ');
+        
+        const el = document.createElement('div');
+        el.className = 'list-item'; // Reutilizamos clase
+        el.style.backgroundColor = 'var(--bg-dark)';
+        
+        el.innerHTML = `
+            <div class="list-item-info">
+                <strong>Pedido #${p.numero_pedido} - ${formatCurrency(p.total_bruto)}</strong>
+                <span style="display:block; margin-top:5px;">${desc}</span>
+                <span style="display:block; margin-top:5px; color: var(--primary); font-weight:600;">${p.medio_pago.toUpperCase()} | ${new Date(p.fecha_hora).toLocaleTimeString()}</span>
+            </div>
+            <div class="list-item-actions">
+                <button class="btn-primary edit-order-btn" data-id="${p.id}">Modificar</button>
+                <button class="btn-danger del-order-btn" data-id="${p.id}">Eliminar</button>
+            </div>
+        `;
+        listContainer.appendChild(el);
+    }
+
+    listContainer.querySelectorAll('.del-order-btn').forEach(btn => {
+        btn.onclick = () => deleteOrder(parseInt(btn.dataset.id));
+    });
+
+    listContainer.querySelectorAll('.edit-order-btn').forEach(btn => {
+        btn.onclick = () => editOrder(parseInt(btn.dataset.id));
+    });
+}
+
+async function deleteOrder(id) {
+    if (!confirm('¿Seguro que deseas eliminar este pedido? Esta acción no se puede deshacer.')) return;
+    try {
+        await db.transaction('rw', db.pedido, db.detalle_pedido, async () => {
+            await db.detalle_pedido.where('pedido_id').equals(id).delete();
+            await db.pedido.delete(id);
+        });
+        renderRecentOrders();
+    } catch(err) {
+        console.error("Error eliminando pedido:", err);
+        alert('Error al eliminar el pedido.');
+    }
+}
+
+async function editOrder(id) {
+    if (cart.length > 0) {
+        if (!confirm('Tenés un ticket en curso. Si continuás, se borrará para cargar el pedido a modificar. ¿Continuar?')) return;
+    }
+    
+    try {
+        const pedido = await db.pedido.get(id);
+        if (!pedido) return;
+        const detalles = await db.detalle_pedido.where('pedido_id').equals(id).toArray();
+        
+        cart = [];
+        for (let d of detalles) {
+            let prod = await db.producto.get(d.producto_id);
+            if (!prod) {
+                prod = {
+                    id: d.producto_id,
+                    nombre: d.nombre_producto_historico,
+                    precio_venta: d.precio_unitario_historico,
+                    costo_unitario: d.costo_unitario_historico,
+                    gramaje_papa: d.gramaje_historico,
+                    cantidad_bebidas: d.bebida_elegida ? 1 : 0
+                };
+            }
+            
+            cart.push({
+                tempId: Date.now() + Math.random(),
+                product: prod,
+                bebidaElegida: d.bebida_elegida,
+                quantity: d.cantidad,
+                subtotal: d.subtotal
+            });
+        }
+        
+        await db.transaction('rw', db.pedido, db.detalle_pedido, async () => {
+            await db.detalle_pedido.where('pedido_id').equals(id).delete();
+            await db.pedido.delete(id);
+        });
+        
+        renderCart();
+        renderRecentOrders();
+        
+    } catch(err) {
+        console.error("Error modificando pedido:", err);
+        alert('Error al modificar el pedido.');
+    }
 }
 
 // ==========================================
