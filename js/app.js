@@ -1042,12 +1042,17 @@ async function loadHistoryView() {
 async function renderHistoryStats(eventId) {
     const pedidos = await db.pedido.where('evento_id').equals(eventId).toArray();
     const costos = await db.costo_extra.where('evento_id').equals(eventId).toArray();
-    
+    const pedidoIds = pedidos.map(p => p.id);
+    const detalles = pedidoIds.length
+        ? await db.detalle_pedido.where('pedido_id').anyOf(pedidoIds).toArray()
+        : [];
+
     let totalBruto = 0;
     let totalNetoVentas = 0;
     let totalCostosExtras = 0;
+    let totalCostosUnitarios = 0;
     let cantPosnet = 0, cantEfectivo = 0, cantTransf = 0;
-    
+
     pedidos.forEach(p => {
         totalBruto += p.total_bruto;
         totalNetoVentas += p.total_neto;
@@ -1060,26 +1065,52 @@ async function renderHistoryStats(eventId) {
         totalCostosExtras += c.monto;
     });
 
-    const totalNetoAjustado = totalNetoVentas - totalCostosExtras;
-    
+    detalles.forEach(d => {
+        totalCostosUnitarios += (d.costo_unitario_historico || 0) * d.cantidad;
+    });
+
+    const beneficioNominal = totalNetoVentas - totalCostosExtras;
+    const beneficioReal = beneficioNominal - totalCostosUnitarios;
+
+    const cardStyle = 'background:var(--bg-card); padding: 20px; border-radius: var(--radius-md); flex: 1; min-width: 180px;';
+    const highlightStyle = 'background:var(--bg-card); padding: 20px; border-radius: var(--radius-md); flex: 1; min-width: 220px; border: 2px solid var(--success);';
+
     const container = document.getElementById('history-stats');
     container.innerHTML = `
-        <div style="display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 30px;">
-            <div style="background:var(--bg-card); padding: 20px; border-radius: var(--radius-md); flex: 1;">
+        <div style="display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 20px;">
+            <div style="${cardStyle}">
                 <h4>Facturación Bruta</h4>
                 <div style="font-size: 28px; font-weight: bold; color: var(--primary)">${formatCurrency(totalBruto)}</div>
             </div>
-            <div style="background:var(--bg-card); padding: 20px; border-radius: var(--radius-md); flex: 1;">
-                <h4>Costos Extra</h4>
+            <div style="${cardStyle}">
+                <h4>Ingresos Netos</h4>
+                <div style="font-size: 28px; font-weight: bold; color: var(--primary)">${formatCurrency(totalNetoVentas)}</div>
+                <small style="color: var(--text-secondary);">Post-comisión posnet</small>
+            </div>
+            <div style="${cardStyle}">
+                <h4>Costos del Evento</h4>
                 <div style="font-size: 28px; font-weight: bold; color: var(--danger)">${formatCurrency(totalCostosExtras)}</div>
             </div>
-            <div style="background:var(--bg-card); padding: 20px; border-radius: var(--radius-md); flex: 1;">
-                <h4>Facturación Neta</h4>
-                <div style="font-size: 28px; font-weight: bold; color: var(--success)">${formatCurrency(totalNetoAjustado)}</div>
+            <div style="${cardStyle}">
+                <h4>Costos Unitarios</h4>
+                <div style="font-size: 28px; font-weight: bold; color: var(--danger)">${formatCurrency(totalCostosUnitarios)}</div>
+                <small style="color: var(--text-secondary);">Costo de productos vendidos</small>
             </div>
-            <div style="background:var(--bg-card); padding: 20px; border-radius: var(--radius-md); flex: 1;">
+            <div style="${cardStyle}">
                 <h4>Pedidos Totales</h4>
                 <div style="font-size: 28px; font-weight: bold;">${pedidos.length}</div>
+            </div>
+        </div>
+        <div style="display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 30px;">
+            <div style="${highlightStyle}">
+                <h4>Beneficio Nominal</h4>
+                <div style="font-size: 28px; font-weight: bold; color: var(--success)">${formatCurrency(beneficioNominal)}</div>
+                <small style="color: var(--text-secondary);">Ingresos Netos − Costos del Evento</small>
+            </div>
+            <div style="${highlightStyle}">
+                <h4>Beneficio Real</h4>
+                <div style="font-size: 28px; font-weight: bold; color: var(--success)">${formatCurrency(beneficioReal)}</div>
+                <small style="color: var(--text-secondary);">Beneficio Nominal − Costos Unitarios</small>
             </div>
         </div>
         <div style="margin-bottom: 20px;">
@@ -1126,6 +1157,7 @@ async function exportToExcel(eventId) {
         let totalGramosVendidos = 0;
         let totalBruto = 0;
         let totalNetoVentas = 0;
+        let totalCostosUnitarios = 0;
 
         for (let p of pedidos) {
             totalBruto += p.total_bruto;
@@ -1135,6 +1167,8 @@ async function exportToExcel(eventId) {
             for (let d of dets) {
                 const gramosTotales = d.gramaje_historico * d.cantidad;
                 totalGramosVendidos += gramosTotales;
+                const costoLinea = (d.costo_unitario_historico || 0) * d.cantidad;
+                totalCostosUnitarios += costoLinea;
 
                 detallesEx.push({
                     'ID Pedido': p.numero_pedido || p.id,
@@ -1142,13 +1176,15 @@ async function exportToExcel(eventId) {
                     'Cantidad': d.cantidad,
                     'Precio Unitario': d.precio_unitario_historico,
                     'Subtotal': d.subtotal,
+                    'Costo Unitario': d.costo_unitario_historico || 0,
+                    'Costo Total Línea': costoLinea,
                     'Gramos Papa / Unidad': d.gramaje_historico,
                     'Gramos Totales': gramosTotales,
                     'Bebidas de promo': d.bebida_elegida || ''
                 });
             }
         }
-        
+
         const wsDetalles = XLSX.utils.json_to_sheet(detallesEx);
         XLSX.utils.book_append_sheet(wb, wsDetalles, "Detalles de Venta");
 
@@ -1158,13 +1194,16 @@ async function exportToExcel(eventId) {
         costos.forEach(c => totalCostosExtras += c.monto);
 
         const kilosVendidos = totalGramosVendidos / 1000;
-        const totalNetoFinal = totalNetoVentas - totalCostosExtras;
+        const beneficioNominal = totalNetoVentas - totalCostosExtras;
+        const beneficioReal = beneficioNominal - totalCostosUnitarios;
 
         const datosResumenDia = [{
             'Facturación Bruta del Día': totalBruto,
-            'Facturación Neta del Día (Sin Costos)': totalNetoVentas,
-            'Costos del Día': totalCostosExtras,
-            'Facturación Neta Final': totalNetoFinal,
+            'Ingresos Netos (Post-Posnet)': totalNetoVentas,
+            'Costos del Evento': totalCostosExtras,
+            'Costos Unitarios Totales': totalCostosUnitarios,
+            'Beneficio Nominal': beneficioNominal,
+            'Beneficio Real': beneficioReal,
             'Kilos de Papa Vendidos': kilosVendidos
         }];
 

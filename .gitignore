@@ -1,0 +1,21 @@
+# Windows / OneDrive
+Thumbs.db
+desktop.ini
+ehthumbs.db
+*.lnk
+
+# macOS
+.DS_Store
+
+# Editores
+.vscode/
+.idea/
+.claude/
+*.swp
+*~
+
+# Node (por si en el futuro lo agregamos)
+node_modules/
+
+# Logs
+*.log
