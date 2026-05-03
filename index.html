@@ -40,6 +40,9 @@
             <div class="event-status" id="nav-event-status">
                 <span class="status-indicator offline"></span> Sin Evento Activo
             </div>
+            <div class="stock-indicator" id="nav-stock-indicator" style="display: none;">
+                <!-- Inyectado dinámicamente -->
+            </div>
         </nav>
 
         <!-- Main Content Area -->
@@ -49,6 +52,12 @@
             <section id="pos-view" class="view active">
                 <div class="pos-layout">
                     <div class="products-panel">
+                        <div class="pos-top-products" id="pos-top-products" style="display: none;">
+                            <!-- Top 3 productos inyectados dinámicamente -->
+                        </div>
+                        <div class="pos-category-tabs" id="pos-category-tabs">
+                            <!-- Tabs de filtro inyectados dinámicamente -->
+                        </div>
                         <div class="products-grid" id="pos-products-grid">
                             <!-- Productos inyectados dinámicamente -->
                         </div>
@@ -129,6 +138,19 @@
                             </div>
                             <button type="submit" class="btn-success">Guardar Configuración</button>
                         </form>
+
+                        <hr style="margin: 32px 0; border: none; border-top: 1px solid var(--bg-card);">
+
+                        <h3 style="margin-bottom: 8px;">📦 Backup de datos</h3>
+                        <p style="color: var(--text-secondary); margin-bottom: 16px; font-size: 14px;">
+                            Toda la información se guarda en este dispositivo. Hacé backups periódicos para no perder datos si reinstalás la app o cambiás de equipo.
+                        </p>
+                        <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px;">
+                            <button type="button" class="btn-primary" id="btn-export-backup">⬇ Exportar backup (.json)</button>
+                            <button type="button" class="btn-success" id="btn-import-backup">⬆ Importar backup</button>
+                            <input type="file" id="backup-file-input" accept="application/json,.json" style="display: none;">
+                        </div>
+                        <div id="backup-info" style="font-size: 12px; color: var(--text-secondary);"></div>
                     </div>
                 </div>
             </section>
@@ -142,6 +164,7 @@
                             <option value="">Seleccione un evento</option>
                         </select>
                         <button class="btn-primary" id="btn-export-excel" disabled>📥 Exportar a Excel</button>
+                        <button class="btn-success" id="btn-share-whatsapp" disabled style="background-color: #25d366;">💬 Compartir WhatsApp</button>
                     </div>
                     <div class="history-stats" id="history-stats">
                         <!-- Estadisticas -->
@@ -239,11 +262,61 @@
                     <label for="ev-lugar">Lugar</label>
                     <input type="text" id="ev-lugar">
                 </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="ev-stock-inicial">Stock inicial de papa cruda (kg)</label>
+                        <input type="number" step="0.1" min="0" id="ev-stock-inicial" value="0">
+                    </div>
+                    <div class="form-group">
+                        <label for="ev-efectivo-inicial">Caja chica / efectivo inicial ($)</label>
+                        <input type="number" step="1" min="0" id="ev-efectivo-inicial" value="0">
+                    </div>
+                </div>
                 <div class="form-group">
                     <label for="ev-obs">Observaciones</label>
                     <textarea id="ev-obs"></textarea>
                 </div>
                 <button type="submit" class="btn-success">Guardar Evento</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Reponer Stock Modal -->
+    <div id="restock-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" id="close-restock-modal">&times;</span>
+            <h2>Reponer stock de papa</h2>
+            <form id="restock-form" class="admin-form">
+                <p style="color: var(--text-secondary); margin-bottom: 16px;">
+                    Sumá kilos crudos al stock del evento activo.
+                </p>
+                <div class="form-group">
+                    <label for="restock-kg">Kilos crudos a sumar</label>
+                    <input type="number" step="0.1" min="0.1" id="restock-kg" required autofocus>
+                </div>
+                <button type="submit" class="btn-success">Sumar al stock</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Cierre de caja Modal -->
+    <div id="cashclose-modal" class="modal">
+        <div class="modal-content" style="max-width: 560px;">
+            <span class="close-modal" id="close-cashclose-modal">&times;</span>
+            <h2>Cierre de caja</h2>
+            <div id="cashclose-summary" style="margin-bottom: 20px;">
+                <!-- Resumen calculado dinámicamente -->
+            </div>
+            <form id="cashclose-form" class="admin-form">
+                <input type="hidden" id="cashclose-evento-id">
+                <div class="form-group">
+                    <label for="cashclose-counted">Efectivo contado al cerrar ($)</label>
+                    <input type="number" step="1" min="0" id="cashclose-counted" required autofocus>
+                </div>
+                <div id="cashclose-diff" style="margin-bottom: 20px; padding: 14px; border-radius: var(--radius-md); display: none;">
+                    <!-- Diferencia calculada dinámicamente -->
+                </div>
+                <button type="submit" class="btn-success">Cerrar caja y finalizar evento</button>
             </form>
         </div>
     </div>
@@ -300,9 +373,10 @@
             </div>
 
             <div style="background: var(--bg-card); padding: 15px; border-radius: var(--radius-md);">
-                <h3 style="margin-bottom: 10px;">Agregar Nuevo Costo</h3>
+                <h3 id="detail-cost-form-title" style="margin-bottom: 10px;">Agregar Nuevo Costo</h3>
                 <form id="detail-cost-form" class="admin-form">
                     <input type="hidden" id="detail-cost-evento-id">
+                    <input type="hidden" id="detail-cost-id">
                     <div class="form-row">
                         <div class="form-group" style="flex: 2;">
                             <label for="detail-cost-desc">Descripción</label>
@@ -313,7 +387,10 @@
                             <input type="number" step="0.01" id="detail-cost-monto" required>
                         </div>
                     </div>
-                    <button type="submit" class="btn-success">Guardar Costo</button>
+                    <div style="display: flex; gap: 10px;">
+                        <button type="submit" class="btn-success" id="detail-cost-submit">Guardar Costo</button>
+                        <button type="button" class="btn-danger" id="detail-cost-cancel" style="display: none;">Cancelar edición</button>
+                    </div>
                 </form>
             </div>
         </div>

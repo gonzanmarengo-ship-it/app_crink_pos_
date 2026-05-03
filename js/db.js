@@ -45,6 +45,28 @@ db.version(5).stores({
     // Schema upgrade if needed
 });
 
+// v6: agrega stock de papa y cierre de caja al evento.
+// No cambian los índices (los nuevos campos no son indexables),
+// pero bumpeamos versión para correr el upgrade que setea defaults
+// a los eventos viejos. Sin esto, sus campos quedan undefined y
+// los cálculos podrían tirar NaN.
+db.version(6).stores({
+    evento: '++id, nombre, estado, fecha_inicio',
+    costo_extra: '++id, evento_id, fecha',
+    producto: '++id, nombre, categoria, activo',
+    configuracion: 'id',
+    pedido: '++id, evento_id, fecha_hora, estado',
+    detalle_pedido: '++id, pedido_id, producto_id, bebida_elegida',
+    bebida: '++id, nombre'
+}).upgrade(async tx => {
+    await tx.table('evento').toCollection().modify(ev => {
+        if (ev.stock_inicial_kg === undefined) ev.stock_inicial_kg = 0;
+        if (ev.stock_repuesto_kg === undefined) ev.stock_repuesto_kg = 0;
+        if (ev.efectivo_inicial === undefined) ev.efectivo_inicial = 0;
+        if (ev.efectivo_final === undefined) ev.efectivo_final = null;
+    });
+});
+
 // Initialize Settings and Default Products if DB is empty
 async function initDb() {
     const configCount = await db.configuracion.count();
@@ -92,4 +114,35 @@ async function getActiveEvent() {
 // Helper to check config
 async function getConfig() {
     return await db.configuracion.get(1);
+}
+
+// Conversión clave del negocio: 1 kg de papa cruda rinde 700 g cocidos.
+const PAPA_RENDIMIENTO_GR_COCIDOS_POR_KG_CRUDO = 700;
+
+// Suma todos los gramos cocidos vendidos en un evento (sale de los snapshots
+// históricos de gramaje en cada detalle de pedido).
+async function getGramosCocidosVendidos(eventoId) {
+    const pedidos = await db.pedido.where('evento_id').equals(eventoId).toArray();
+    if (pedidos.length === 0) return 0;
+    const ids = pedidos.map(p => p.id);
+    const detalles = await db.detalle_pedido.where('pedido_id').anyOf(ids).toArray();
+    return detalles.reduce((acc, d) => acc + (d.gramaje_historico || 0) * d.cantidad, 0);
+}
+
+// Calcula el snapshot de stock del evento (todo en kg crudos).
+// Devuelve { inicial, repuesto, total_cargado, consumido, restante }.
+async function getStockEvento(eventoId) {
+    const ev = await db.evento.get(eventoId);
+    if (!ev) return null;
+
+    const inicial = ev.stock_inicial_kg || 0;
+    const repuesto = ev.stock_repuesto_kg || 0;
+    const totalCargado = inicial + repuesto;
+
+    const gramosCocidosVendidos = await getGramosCocidosVendidos(eventoId);
+    // gramos cocidos → kg crudos: dividir por 700 (rendimiento) y por 1000 (g→kg)
+    const consumido = gramosCocidosVendidos / PAPA_RENDIMIENTO_GR_COCIDOS_POR_KG_CRUDO / 1000;
+    const restante = totalCargado - consumido;
+
+    return { inicial, repuesto, totalCargado, consumido, restante };
 }
