@@ -140,8 +140,10 @@ async function getStockEvento(eventoId) {
     const totalCargado = inicial + repuesto;
 
     const gramosCocidosVendidos = await getGramosCocidosVendidos(eventoId);
-    // gramos cocidos → kg crudos: dividir por 700 (rendimiento) y por 1000 (g→kg)
-    const consumido = gramosCocidosVendidos / PAPA_RENDIMIENTO_GR_COCIDOS_POR_KG_CRUDO / 1000;
+    // gramos cocidos → kg crudos: dividir por la constante (g_cocidos/kg_crudo).
+    // La constante ya tiene unidades g/kg, así que el resultado es directo en kg crudos.
+    // NO dividir por 1000 extra: eso haría el resultado 1000× demasiado chico.
+    const consumido = gramosCocidosVendidos / PAPA_RENDIMIENTO_GR_COCIDOS_POR_KG_CRUDO;
     const restante = totalCargado - consumido;
 
     return { inicial, repuesto, totalCargado, consumido, restante };

@@ -1734,7 +1734,6 @@ async function renderHistoryStats(eventId) {
         </div>
         ${renderStockSection(stock)}
         ${renderCajaSection(evento, cantEfectivo > 0 ? pedidos.filter(p => p.medio_pago === 'efectivo').reduce((acc, p) => acc + p.total_bruto, 0) : 0)}
-        ${renderHourlyChart(pedidos)}
         ${renderTopRevenueChart(detalles)}
         ${renderBreakdownSection('Productos Vendidos', productosVendidos, 'No se vendieron productos.')}
         ${renderBreakdownSection('Bebidas Vendidas (por tipo)', bebidasVendidas, 'No se vendieron bebidas en este evento.')}
@@ -1797,65 +1796,6 @@ function renderCajaSection(evento, ventasEfectivo) {
 
 // Gráfico de barras: facturación bruta por hora del día.
 // Identifica horas pico para planificar producción.
-function renderHourlyChart(pedidos) {
-    if (pedidos.length === 0) return '';
-
-    // Agrupo por hora (0-23). Sumo total_bruto por hora.
-    const porHora = new Array(24).fill(0);
-    pedidos.forEach(p => {
-        const h = new Date(p.fecha_hora).getHours();
-        porHora[h] += p.total_bruto;
-    });
-
-    // Recorto a las horas con actividad para no mostrar 24h vacías.
-    const horasConVentas = porHora
-        .map((v, h) => ({ h, v }))
-        .filter(x => x.v > 0);
-
-    if (horasConVentas.length === 0) return '';
-
-    const minH = horasConVentas[0].h;
-    const maxH = horasConVentas[horasConVentas.length - 1].h;
-    const rango = [];
-    for (let h = minH; h <= maxH; h++) rango.push({ h, v: porHora[h] });
-
-    const max = Math.max(...rango.map(x => x.v));
-    const w = 100; // viewBox units por barra
-    const totalW = w * rango.length;
-    const h = 200;
-    const padBottom = 30;
-    const padTop = 20;
-
-    const bars = rango.map((x, i) => {
-        const barH = max > 0 ? ((x.v / max) * (h - padBottom - padTop)) : 0;
-        const y = h - padBottom - barH;
-        const xPos = i * w + 10;
-        const barW = w - 20;
-        const color = x.v > 0 ? 'var(--primary)' : 'var(--bg-card)';
-        return `
-            <rect x="${xPos}" y="${y}" width="${barW}" height="${barH}"
-                  fill="${color}" rx="4">
-                <title>${x.h}:00 — ${formatCurrency(x.v)}</title>
-            </rect>
-            <text x="${xPos + barW/2}" y="${h - padBottom + 18}"
-                  fill="var(--text-secondary)" font-size="14" text-anchor="middle">${x.h}h</text>
-            ${x.v > 0 ? `<text x="${xPos + barW/2}" y="${y - 6}" fill="var(--text-primary)" font-size="12" text-anchor="middle" font-weight="600">${Math.round(x.v/1000)}k</text>` : ''}
-        `;
-    }).join('');
-
-    return `
-        <div style="background: var(--bg-card); padding: 20px; border-radius: var(--radius-md); margin-bottom: 20px;">
-            <h4 style="margin-bottom: 12px;">📈 Facturación por hora</h4>
-            <div style="overflow-x: auto;">
-                <svg viewBox="0 0 ${totalW} ${h}" style="width: 100%; min-width: ${rango.length * 50}px; height: ${h}px; display: block;" preserveAspectRatio="none">
-                    ${bars}
-                </svg>
-            </div>
-            <small style="color: var(--text-secondary); display: block; margin-top: 8px;">Pasá el mouse por las barras para ver el monto exacto.</small>
-        </div>
-    `;
-}
-
 // Gráfico horizontal: top 5 productos por facturación (no por cantidad).
 function renderTopRevenueChart(detalles) {
     if (detalles.length === 0) return '';
