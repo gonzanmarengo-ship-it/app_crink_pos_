@@ -43,6 +43,9 @@
             <div class="stock-indicator" id="nav-stock-indicator" style="display: none;">
                 <!-- Inyectado dinámicamente -->
             </div>
+            <div class="stock-indicator" id="nav-bebidas-indicator" style="display: none;">
+                <!-- Inyectado dinámicamente -->
+            </div>
         </nav>
 
         <!-- Main Content Area -->
@@ -74,6 +77,10 @@
                         <h2>Ticket Actual</h2>
                         <div class="cart-items" id="cart-items">
                             <!-- Items inyectados dinámicamente -->
+                        </div>
+                        <div class="cart-note" style="padding: 8px 0;">
+                            <input type="text" id="cart-note-input" placeholder="Nota del pedido (opcional)"
+                                   style="width:100%;padding:8px 12px;border-radius:var(--radius-sm);border:1px solid var(--bg-card);background:var(--bg-dark);color:var(--text-primary);font-size:13px;">
                         </div>
                         <div class="cart-summary">
                             <div class="summary-row">
@@ -184,6 +191,15 @@
             <span class="close-modal" id="close-payment-modal">&times;</span>
             <h2>Seleccionar Medio de Pago</h2>
             <div class="payment-total">TOTAL: <strong id="payment-total-amount">$0</strong></div>
+            <div style="display:flex;align-items:center;gap:10px;margin:12px 0;">
+                <label for="payment-discount" style="white-space:nowrap;font-size:14px;">Descuento $</label>
+                <input type="number" id="payment-discount" min="0" step="1" value="0"
+                       style="flex:1;padding:8px 12px;border-radius:var(--radius-sm);border:1px solid var(--bg-card);background:var(--bg-dark);color:var(--text-primary);font-size:16px;max-width:140px;">
+                <button type="button" id="btn-cortesia" style="padding:8px 16px;border-radius:var(--radius-sm);border:none;background:var(--warning);color:#000;font-weight:700;cursor:pointer;white-space:nowrap;">🎁 Cortesía</button>
+            </div>
+            <div id="payment-final-total" style="text-align:center;font-size:18px;font-weight:700;margin-bottom:12px;display:none;">
+                A cobrar: <span id="payment-final-amount">$0</span>
+            </div>
             <div class="payment-methods">
                 <button class="pay-method-btn method-cash" data-method="efectivo">EFECTIVO</button>
                 <button class="pay-method-btn method-transfer" data-method="transferencia">TRANSFERENCIA</button>
@@ -272,6 +288,12 @@
                         <input type="number" step="1" min="0" id="ev-efectivo-inicial" value="0">
                     </div>
                 </div>
+                <div id="ev-stock-bebidas-container" class="form-group">
+                    <label>📦 Stock de bebidas (unidades)</label>
+                    <div id="ev-stock-bebidas" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-top:8px;">
+                        <!-- Inyectado dinámicamente desde app.js -->
+                    </div>
+                </div>
                 <div class="form-group">
                     <label for="ev-obs">Observaciones</label>
                     <textarea id="ev-obs"></textarea>
@@ -293,6 +315,23 @@
                 <div class="form-group">
                     <label for="restock-kg">Kilos crudos a sumar</label>
                     <input type="number" step="0.1" min="0.1" id="restock-kg" required autofocus>
+                </div>
+                <button type="submit" class="btn-success">Sumar al stock</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Reponer Bebidas Modal -->
+    <div id="restock-bebidas-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" id="close-restock-bebidas-modal">&times;</span>
+            <h2>Reponer bebidas</h2>
+            <form id="restock-bebidas-form" class="admin-form">
+                <p style="color: var(--text-secondary); margin-bottom: 16px;">
+                    Sumá unidades al stock de bebidas del evento activo.
+                </p>
+                <div id="restock-bebidas-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:16px;">
+                    <!-- Inyectado dinámicamente -->
                 </div>
                 <button type="submit" class="btn-success">Sumar al stock</button>
             </form>

@@ -82,6 +82,7 @@ async function updateEventStatus() {
         eventStatusIndicator.innerHTML = `<span class="status-indicator offline"></span> Sin Evento Activo`;
     }
     await renderStockIndicator();
+    await renderBeverageStockIndicator();
 }
 
 // Renderiza el indicador de stock en la barra (oculto si no hay evento o no se cargó stock).
@@ -110,8 +111,9 @@ async function renderStockIndicator() {
     let porcionesEstimadas = null;
     if (papas.length > 0 && stock.restante > 0) {
         const gramajePromedio = papas.reduce((acc, p) => acc + p.gramaje_papa, 0) / papas.length;
-        // restante (kg crudos) → gramos cocidos: × 700 (rendimiento) × 1000 (kg→g)
-        const gramosCocidosRestantes = stock.restante * PAPA_RENDIMIENTO_GR_COCIDOS_POR_KG_CRUDO * 1000;
+        // restante (kg crudos) → gramos cocidos: × 700 (rendimiento).
+        // La constante ya convierte kg crudos a gramos cocidos directamente.
+        const gramosCocidosRestantes = stock.restante * PAPA_RENDIMIENTO_GR_COCIDOS_POR_KG_CRUDO;
         porcionesEstimadas = Math.floor(gramosCocidosRestantes / gramajePromedio);
     }
 
@@ -134,6 +136,99 @@ function openRestockModal() {
     document.getElementById('restock-form').reset();
     document.getElementById('restock-modal').classList.add('active');
 }
+
+// ── Indicador de stock de bebidas en sidebar ──
+async function renderBeverageStockIndicator() {
+    const container = document.getElementById('nav-bebidas-indicator');
+    if (!container) return;
+
+    if (!currentEvent) {
+        container.style.display = 'none';
+        container.innerHTML = '';
+        return;
+    }
+
+    const stockBebidas = await getStockBebidasEvento(currentEvent.id);
+    if (stockBebidas.length === 0) {
+        container.style.display = 'none';
+        container.innerHTML = '';
+        return;
+    }
+
+    // Determinar nivel general: si alguna bebida se agotó → warning
+    const hayAgotada = stockBebidas.some(b => b.restante <= 0);
+    const hayBaja = stockBebidas.some(b => b.total > 0 && b.restante / b.total < 0.25);
+    let nivel = 'stock-ok';
+    if (hayAgotada) nivel = 'stock-out';
+    else if (hayBaja) nivel = 'stock-low';
+
+    const items = stockBebidas.map(b => {
+        const color = b.restante <= 0 ? 'var(--danger)' : (b.total > 0 && b.restante / b.total < 0.25 ? 'var(--warning)' : 'var(--success)');
+        return `<span style="color:${color};font-weight:600;">${b.nombre}: ${b.restante}</span>`;
+    }).join(' · ');
+
+    container.className = `stock-indicator ${nivel}`;
+    container.style.display = 'block';
+    container.innerHTML = `
+        <small>🍺 STOCK BEBIDAS</small>
+        <span class="stock-meta" style="margin-top:4px;line-height:1.5;">${items}</span>
+        <button id="btn-restock-bebidas">+ Reponer bebidas</button>
+    `;
+    document.getElementById('btn-restock-bebidas').onclick = () => openRestockBebidasModal();
+}
+
+async function openRestockBebidasModal() {
+    if (!currentEvent) { showToast('Necesitás un evento activo.', 'warning'); return; }
+
+    const stockBebidas = await getStockBebidasEvento(currentEvent.id);
+    const grid = document.getElementById('restock-bebidas-grid');
+    grid.innerHTML = '';
+
+    stockBebidas.forEach(b => {
+        const div = document.createElement('div');
+        div.style.cssText = 'display:flex;align-items:center;gap:8px;';
+        div.innerHTML = `
+            <label style="flex:1;font-size:13px;">${b.nombre} <small style="color:var(--text-secondary);">(quedan ${b.restante})</small></label>
+            <input type="number" min="0" value="0" data-bebida="${b.nombre}"
+                   style="width:60px;padding:6px;border-radius:var(--radius-sm);border:1px solid var(--bg-card);background:var(--bg-dark);color:var(--text-primary);text-align:center;">
+        `;
+        grid.appendChild(div);
+    });
+
+    document.getElementById('restock-bebidas-modal').classList.add('active');
+}
+
+document.getElementById('restock-bebidas-form').onsubmit = async (e) => {
+    e.preventDefault();
+    if (!currentEvent) return;
+
+    const inputs = document.querySelectorAll('#restock-bebidas-grid input[data-bebida]');
+    let total = 0;
+
+    for (const input of inputs) {
+        const cant = parseInt(input.value) || 0;
+        if (cant <= 0) continue;
+
+        const nombre = input.dataset.bebida;
+        // Buscar la fila en stock_bebida y sumar a cantidad_repuesta
+        const filas = await db.stock_bebida.where('evento_id').equals(currentEvent.id).toArray();
+        const fila = filas.find(f => f.bebida_nombre === nombre);
+        if (fila) {
+            await db.stock_bebida.update(fila.id, { cantidad_repuesta: (fila.cantidad_repuesta || 0) + cant });
+            total += cant;
+        }
+    }
+
+    document.getElementById('restock-bebidas-modal').classList.remove('active');
+    if (total > 0) {
+        showToast(`+${total} bebidas repuestas`, 'success');
+        await renderBeverageStockIndicator();
+    }
+};
+
+document.getElementById('close-restock-bebidas-modal').onclick = () => {
+    document.getElementById('restock-bebidas-modal').classList.remove('active');
+};
 
 // Aviso (no bloqueante) si el stock cayó a niveles críticos.
 // Se llama después de cada venta. Diseño: avisar UNA vez por umbral
@@ -559,39 +654,77 @@ function renderCart() {
 
 function showPaymentModal(totalBruto) {
     document.getElementById('payment-total-amount').textContent = formatCurrency(totalBruto);
-    
+
+    // Reset descuento
+    const discountInput = document.getElementById('payment-discount');
+    const finalTotalDiv = document.getElementById('payment-final-total');
+    const finalAmountSpan = document.getElementById('payment-final-amount');
+    discountInput.value = 0;
+    discountInput.max = totalBruto;
+    finalTotalDiv.style.display = 'none';
+
+    // Actualizar "a cobrar" en tiempo real cuando cambia el descuento
+    const updateFinalDisplay = () => {
+        const desc = parseFloat(discountInput.value) || 0;
+        if (desc > 0) {
+            finalTotalDiv.style.display = 'block';
+            finalAmountSpan.textContent = formatCurrency(Math.max(0, totalBruto - desc));
+        } else {
+            finalTotalDiv.style.display = 'none';
+        }
+    };
+    discountInput.oninput = updateFinalDisplay;
+
+    // Botón cortesía: descuento = 100% y procesa inmediatamente
+    document.getElementById('btn-cortesia').onclick = () => {
+        processPayment('cortesia', totalBruto, totalBruto);
+    };
+
     const posnetInfo = document.getElementById('posnet-fee-info');
     if (appConfig) {
         posnetInfo.innerHTML = `(Comisión ${appConfig.porcentaje_comision_posnet}% <br> Neto: ${formatCurrency(totalBruto * (1 - appConfig.porcentaje_comision_posnet/100))})`;
     }
-    
-    // Bind payment buttons
+
+    // Bind payment buttons — pasan el descuento actual
     document.querySelectorAll('.pay-method-btn').forEach(btn => {
-        btn.onclick = () => processPayment(btn.dataset.method, totalBruto);
+        btn.onclick = () => {
+            const desc = parseFloat(discountInput.value) || 0;
+            processPayment(btn.dataset.method, totalBruto, desc);
+        };
     });
-    
+
     document.getElementById('payment-modal').classList.add('active');
 }
 
-async function processPayment(metodo, totalBruto) {
+async function processPayment(metodo, totalBruto, descuento = 0) {
      if (!currentEvent) return;
-     
-     let totalNeto = totalBruto;
+
+     // Asegurar que descuento no sea mayor que el total
+     descuento = Math.min(Math.max(descuento, 0), totalBruto);
+
+     const totalConDescuento = totalBruto - descuento;
+     let totalNeto = totalConDescuento;
      let comisionPosnet = 0;
-     
-     if (metodo === 'posnet' && appConfig) {
-         comisionPosnet = totalBruto * (appConfig.porcentaje_comision_posnet / 100);
-         totalNeto = totalBruto - comisionPosnet;
+
+     if (metodo === 'cortesia') {
+         // Cortesía: se registra el valor bruto (para saber qué se regaló)
+         // pero neto = 0 y descuento = totalBruto.
+         descuento = totalBruto;
+         totalNeto = 0;
+     } else if (metodo === 'posnet' && appConfig) {
+         comisionPosnet = totalConDescuento * (appConfig.porcentaje_comision_posnet / 100);
+         totalNeto = totalConDescuento - comisionPosnet;
      }
-     
+
+     // Nota del pedido
+     const notaInput = document.getElementById('cart-note-input');
+     const nota = notaInput ? notaInput.value.trim() : '';
+
      const now = new Date();
-     
+
      try {
-         // Start transaction for consistency
          await db.transaction('rw', db.pedido, db.detalle_pedido, async () => {
 
-             // Próximo número de pedido: max(numeros usados) + 1.
-             // Usar count+1 falla si se borró un pedido del medio (colisión de número).
              const pedidosEvento = await db.pedido.where('evento_id').equals(currentEvent.id).toArray();
              const proximoNumero = pedidosEvento.length > 0
                  ? Math.max(...pedidosEvento.map(p => p.numero_pedido || 0)) + 1
@@ -602,13 +735,14 @@ async function processPayment(metodo, totalBruto) {
                  evento_id: currentEvent.id,
                  fecha_hora: now,
                  total_bruto: totalBruto,
+                 descuento: descuento,
                  medio_pago: metodo,
                  comision_posnet: comisionPosnet,
                  total_neto: totalNeto,
+                 nota: nota,
                  estado: 'confirmado'
              });
-             
-             // Add details copying current values (Snapshot)
+
              const detallesToInsert = cart.map(item => ({
                  pedido_id: pedidoId,
                  producto_id: item.product.id,
@@ -620,22 +754,29 @@ async function processPayment(metodo, totalBruto) {
                  cantidad: item.quantity,
                  subtotal: item.subtotal
              }));
-             
+
              await db.detalle_pedido.bulkAdd(detallesToInsert);
          });
-         
+
          // Success
-         cart = []; // clear cart
+         cart = [];
+         if (notaInput) notaInput.value = '';
          renderCart();
-         renderRecentOrders(); // Actualizar lista de recientes al procesar
-         renderPOSTopProducts(); // El ranking puede haber cambiado
+         renderRecentOrders();
+         renderPOSTopProducts();
          document.getElementById('payment-modal').classList.remove('active');
 
-         showToast(`Pedido cobrado · ${formatCurrency(totalNeto)} (${metodo})`, 'success');
+         if (metodo === 'cortesia') {
+             showToast(`🎁 Cortesía registrada · ${formatCurrency(totalBruto)}`, 'info');
+         } else if (descuento > 0) {
+             showToast(`Pedido cobrado · ${formatCurrency(totalNeto)} (${metodo}, desc. ${formatCurrency(descuento)})`, 'success');
+         } else {
+             showToast(`Pedido cobrado · ${formatCurrency(totalNeto)} (${metodo})`, 'success');
+         }
          playBeep();
 
-         // Actualizar indicador de stock; si cayó a 0/negativo, avisar.
          await renderStockIndicator();
+         await renderBeverageStockIndicator();
          await checkStockWarning();
 
      } catch (err) {
@@ -667,16 +808,28 @@ async function renderRecentOrders() {
 
     for (let p of pedidos) {
         const detalles = await db.detalle_pedido.where('pedido_id').equals(p.id).toArray();
-        let desc = detalles.map(d => `${d.cantidad}x ${d.nombre_producto_historico}${d.bebida_elegida ? ` (${d.bebida_elegida})` : ''}`).join(', ');
-        
+        let prodDesc = detalles.map(d => `${d.cantidad}x ${d.nombre_producto_historico}${d.bebida_elegida ? ` (${d.bebida_elegida})` : ''}`).join(', ');
+
+        // Badges para cortesía y descuento
+        let badges = '';
+        if (p.medio_pago === 'cortesia') {
+            badges += '<span style="background:var(--warning);color:#000;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;margin-left:8px;">🎁 CORTESÍA</span>';
+        } else if ((p.descuento || 0) > 0) {
+            badges += `<span style="background:var(--primary);color:#fff;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;margin-left:8px;">-${formatCurrency(p.descuento)}</span>`;
+        }
+
+        // Nota
+        const notaHtml = p.nota ? `<span style="display:block; margin-top:4px; font-style:italic; color:var(--text-secondary); font-size:12px;">📝 ${p.nota}</span>` : '';
+
         const el = document.createElement('div');
-        el.className = 'list-item'; // Reutilizamos clase
+        el.className = 'list-item';
         el.style.backgroundColor = 'var(--bg-dark)';
-        
+
         el.innerHTML = `
             <div class="list-item-info">
-                <strong>Pedido #${p.numero_pedido} - ${formatCurrency(p.total_bruto)}</strong>
-                <span style="display:block; margin-top:5px;">${desc}</span>
+                <strong>Pedido #${p.numero_pedido} - ${formatCurrency(p.total_bruto)}${badges}</strong>
+                <span style="display:block; margin-top:5px;">${prodDesc}</span>
+                ${notaHtml}
                 <span style="display:block; margin-top:5px; color: var(--primary); font-weight:600;">${p.medio_pago.toUpperCase()} | ${new Date(p.fecha_hora).toLocaleTimeString()}</span>
             </div>
             <div class="list-item-actions">
@@ -750,11 +903,15 @@ async function editOrder(id) {
             });
         }
         
+        // Restaurar la nota del pedido original en el input
+        const notaInput = document.getElementById('cart-note-input');
+        if (notaInput && pedido.nota) notaInput.value = pedido.nota;
+
         await db.transaction('rw', db.pedido, db.detalle_pedido, async () => {
             await db.detalle_pedido.where('pedido_id').equals(id).delete();
             await db.pedido.delete(id);
         });
-        
+
         renderCart();
         renderRecentOrders();
         
@@ -889,22 +1046,14 @@ async function renderEventsList() {
                 const evId = parseInt(btn.dataset.id);
                 
                 try {
-                    await db.transaction('rw', db.evento, db.pedido, db.detalle_pedido, db.costo_extra, async () => {
-                        // Get all orders for this event
+                    await db.transaction('rw', db.evento, db.pedido, db.detalle_pedido, db.costo_extra, db.stock_bebida, async () => {
                         const pedidos = await db.pedido.where('evento_id').equals(evId).toArray();
-                        
-                        // Delete order details
                         for (let p of pedidos) {
                             await db.detalle_pedido.where('pedido_id').equals(p.id).delete();
                         }
-                        
-                        // Delete orders
                         await db.pedido.where('evento_id').equals(evId).delete();
-                        
-                        // Delete extra costs
                         await db.costo_extra.where('evento_id').equals(evId).delete();
-                        
-                        // Delete event itself
+                        await db.stock_bebida.where('evento_id').equals(evId).delete();
                         await db.evento.delete(evId);
                     });
                     
@@ -1248,23 +1397,43 @@ document.getElementById('product-form').onsubmit = async (e) => {
 };
 
 // Event Management
-document.getElementById('btn-new-event').onclick = () => {
+document.getElementById('btn-new-event').onclick = async () => {
     document.getElementById('event-form').reset();
     document.getElementById('ev-id').value = '';
     document.getElementById('ev-stock-inicial').value = '0';
     document.getElementById('ev-efectivo-inicial').value = '0';
     document.getElementById('event-modal-title').textContent = 'Nuevo Evento';
-    // En modo creación mostramos los campos de stock y caja inicial
     toggleEventFormInitialFields(true);
+    await populateBeverageStockInputs(); // Cargar inputs de bebidas
     document.getElementById('event-modal').classList.add('active');
 };
 
-// Muestra u oculta los campos de stock_inicial / efectivo_inicial.
-// Solo se cargan al CREAR un evento; al editar quedan ocultos para no
-// pisar el progreso (ver comentario en el handler del form).
+// Muestra u oculta los campos de stock_inicial / efectivo_inicial / bebidas.
+// Solo se cargan al CREAR un evento; al editar quedan ocultos.
 function toggleEventFormInitialFields(show) {
     const stockField = document.getElementById('ev-stock-inicial').closest('.form-row');
     if (stockField) stockField.style.display = show ? 'flex' : 'none';
+    const bebidasContainer = document.getElementById('ev-stock-bebidas-container');
+    if (bebidasContainer) bebidasContainer.style.display = show ? 'block' : 'none';
+}
+
+// Genera un input numérico por cada bebida registrada en la tabla `bebida`.
+// El usuario pone la cantidad que lleva al evento (0 = no lleva esa).
+async function populateBeverageStockInputs() {
+    const container = document.getElementById('ev-stock-bebidas');
+    if (!container) return;
+    const bebidas = await db.bebida.toArray();
+    container.innerHTML = '';
+    bebidas.forEach(b => {
+        const div = document.createElement('div');
+        div.style.cssText = 'display:flex;align-items:center;gap:6px;';
+        div.innerHTML = `
+            <label style="flex:1;font-size:13px;">${b.nombre}</label>
+            <input type="number" min="0" value="0" data-bebida-nombre="${b.nombre}"
+                   style="width:60px;padding:6px;border-radius:var(--radius-sm);border:1px solid var(--bg-card);background:var(--bg-dark);color:var(--text-primary);text-align:center;">
+        `;
+        container.appendChild(div);
+    });
 }
 
 document.getElementById('event-form').onsubmit = async (e) => {
@@ -1281,9 +1450,8 @@ document.getElementById('event-form').onsubmit = async (e) => {
     };
 
     if (id) {
-        // Edición: solo actualizo metadata, NO toco stock/efectivo (esos
-        // los maneja el cierre y el botón de reponer; sobreescribir acá
-        // borraría el progreso del evento).
+        // Edición: solo actualizo metadata, NO toco stock/efectivo/bebidas
+        // (sobreescribir acá borraría el progreso del evento).
         await db.evento.update(parseInt(id), data);
     } else {
         // Creación: cierra cualquier evento activo y abre el nuevo.
@@ -1297,7 +1465,25 @@ document.getElementById('event-form').onsubmit = async (e) => {
         data.stock_repuesto_kg = 0;
         data.efectivo_inicial = efectivoInicial;
         data.efectivo_final = null;
-        await db.evento.add(data);
+        const nuevoEventoId = await db.evento.add(data);
+
+        // Guardar stock de bebidas (solo las que tienen cantidad > 0)
+        const bebidasInputs = document.querySelectorAll('#ev-stock-bebidas input[data-bebida-nombre]');
+        const stockBebidas = [];
+        bebidasInputs.forEach(input => {
+            const cant = parseInt(input.value) || 0;
+            if (cant > 0) {
+                stockBebidas.push({
+                    evento_id: nuevoEventoId,
+                    bebida_nombre: input.dataset.bebidaNombre,
+                    cantidad_inicial: cant,
+                    cantidad_repuesta: 0
+                });
+            }
+        });
+        if (stockBebidas.length > 0) {
+            await db.stock_bebida.bulkAdd(stockBebidas);
+        }
     }
 
     document.getElementById('event-modal').classList.remove('active');
@@ -1335,9 +1521,10 @@ async function openCashCloseModal(eventoId) {
     if (!ev) return;
 
     const pedidos = await db.pedido.where('evento_id').equals(eventoId).toArray();
+    // Efectivo real recibido = bruto − descuento (si hubo)
     const ventasEfectivo = pedidos
         .filter(p => p.medio_pago === 'efectivo')
-        .reduce((acc, p) => acc + p.total_bruto, 0);
+        .reduce((acc, p) => acc + p.total_bruto - (p.descuento || 0), 0);
 
     const inicial = ev.efectivo_inicial || 0;
     const esperado = inicial + ventasEfectivo;
@@ -1617,6 +1804,17 @@ async function shareEventoWhatsApp(eventoId) {
             txt += `\n`;
         }
 
+        // Stock de bebidas
+        const stockBebidas = await getStockBebidasEvento(eventoId);
+        if (stockBebidas.length > 0) {
+            txt += `\n🍺 *Bebidas:*\n`;
+            stockBebidas.forEach(b => {
+                txt += `  ${b.nombre}: ${b.consumido} vendidas / ${b.total} cargadas`;
+                if (b.restante > 0) txt += ` (quedan ${b.restante})`;
+                txt += `\n`;
+            });
+        }
+
         if (top.length > 0) {
             txt += `\n🏆 *Más vendidos:*\n`;
             top.forEach(([nombre, cant], i) => {
@@ -1646,16 +1844,19 @@ async function renderHistoryStats(eventId) {
     let totalNetoVentas = 0;
     let totalCostosExtras = 0;
     let totalCostosUnitarios = 0;
-    let cantPosnet = 0, cantEfectivo = 0, cantTransf = 0;
+    let cantPosnet = 0, cantEfectivo = 0, cantTransf = 0, cantCortesia = 0;
+    let totalDescuentos = 0;
 
     // Desglose por producto y por tipo de bebida
-    const productosVendidos = new Map(); // nombre -> cantidad total
-    const bebidasVendidas = new Map();   // tipo de bebida -> cantidad total
+    const productosVendidos = new Map();
+    const bebidasVendidas = new Map();
 
     pedidos.forEach(p => {
         totalBruto += p.total_bruto;
         totalNetoVentas += p.total_neto;
-        if (p.medio_pago === 'posnet') cantPosnet++;
+        totalDescuentos += (p.descuento || 0);
+        if (p.medio_pago === 'cortesia') cantCortesia++;
+        else if (p.medio_pago === 'posnet') cantPosnet++;
         else if (p.medio_pago === 'efectivo') cantEfectivo++;
         else cantTransf++;
     });
@@ -1730,10 +1931,13 @@ async function renderHistoryStats(eventId) {
                 <li>Efectivo: ${cantEfectivo}</li>
                 <li>Transferencia: ${cantTransf}</li>
                 <li>Posnet: ${cantPosnet}</li>
+                ${cantCortesia > 0 ? `<li>🎁 Cortesías: ${cantCortesia}</li>` : ''}
+                ${totalDescuentos > 0 ? `<li>Descuentos otorgados: ${formatCurrency(totalDescuentos)}</li>` : ''}
             </ul>
         </div>
         ${renderStockSection(stock)}
-        ${renderCajaSection(evento, cantEfectivo > 0 ? pedidos.filter(p => p.medio_pago === 'efectivo').reduce((acc, p) => acc + p.total_bruto, 0) : 0)}
+        ${await renderBeverageStockSectionHistory(eventId)}
+        ${renderCajaSection(evento, cantEfectivo > 0 ? pedidos.filter(p => p.medio_pago === 'efectivo').reduce((acc, p) => acc + p.total_bruto - (p.descuento || 0), 0) : 0)}
         ${renderTopRevenueChart(detalles)}
         ${renderBreakdownSection('Productos Vendidos', productosVendidos, 'No se vendieron productos.')}
         ${renderBreakdownSection('Bebidas Vendidas (por tipo)', bebidasVendidas, 'No se vendieron bebidas en este evento.')}
@@ -1756,6 +1960,32 @@ function renderStockSection(stock) {
                 <div><small style="color: var(--text-secondary);">Vendido (crudos eq.)</small><br><strong>${stock.consumido.toFixed(2)} kg</strong></div>
                 <div><small style="color: var(--text-secondary);">Sobrante / faltante</small><br><strong style="color: ${colorSobrante};">${sobrante.toFixed(2)} kg</strong></div>
             </div>
+        </div>
+    `;
+}
+
+async function renderBeverageStockSectionHistory(eventoId) {
+    const stockBebidas = await getStockBebidasEvento(eventoId);
+    if (stockBebidas.length === 0) return '';
+
+    const filas = stockBebidas.map(b => {
+        const color = b.restante <= 0 ? 'var(--danger)' : (b.restante < b.total * 0.25 ? 'var(--warning)' : 'var(--success)');
+        return `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--bg-darker);">
+                <span style="font-weight:500;">${b.nombre}</span>
+                <span style="display:flex;gap:16px;font-size:13px;">
+                    <span>Cargadas: <strong>${b.total}</strong></span>
+                    <span>Vendidas: <strong>${b.consumido}</strong></span>
+                    <span style="color:${color};font-weight:700;">Quedan: ${b.restante}</span>
+                </span>
+            </div>
+        `;
+    }).join('');
+
+    return `
+        <div style="background: var(--bg-card); padding: 20px; border-radius: var(--radius-md); margin-bottom: 20px;">
+            <h4 style="margin-bottom: 12px;">🍺 Stock de bebidas</h4>
+            ${filas}
         </div>
     `;
 }

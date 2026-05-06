@@ -1,4 +1,4 @@
-const CACHE_NAME = "crink-pos-v4";
+const CACHE_NAME = "crink-pos-v5";
 
 const urlsToCache = [
   "./",

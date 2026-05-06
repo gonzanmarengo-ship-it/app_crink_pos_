@@ -67,6 +67,25 @@ db.version(6).stores({
     });
 });
 
+// v7: agrega stock_bebida (inventario de bebidas por evento),
+// nota y descuento en pedidos. También permite medio_pago = 'cortesia'.
+db.version(7).stores({
+    evento: '++id, nombre, estado, fecha_inicio',
+    costo_extra: '++id, evento_id, fecha',
+    producto: '++id, nombre, categoria, activo',
+    configuracion: 'id',
+    pedido: '++id, evento_id, fecha_hora, estado',
+    detalle_pedido: '++id, pedido_id, producto_id, bebida_elegida',
+    bebida: '++id, nombre',
+    stock_bebida: '++id, evento_id'
+}).upgrade(async tx => {
+    // Pedidos viejos: defaults para nuevos campos
+    await tx.table('pedido').toCollection().modify(p => {
+        if (p.nota === undefined) p.nota = '';
+        if (p.descuento === undefined) p.descuento = 0;
+    });
+});
+
 // Initialize Settings and Default Products if DB is empty
 async function initDb() {
     const configCount = await db.configuracion.count();
@@ -147,4 +166,53 @@ async function getStockEvento(eventoId) {
     const restante = totalCargado - consumido;
 
     return { inicial, repuesto, totalCargado, consumido, restante };
+}
+
+// ── Stock de bebidas por evento ──────────────────────────────────
+// Cada fila de stock_bebida tiene: evento_id, bebida_nombre,
+// cantidad_inicial, cantidad_repuesta.
+// Lo consumido se calcula dinámicamente parseando bebida_elegida
+// de los detalles de pedido del evento.
+
+// Cuenta cuántas unidades de cada bebida se vendieron en un evento.
+// Devuelve un Map<nombre, cantidad>.
+async function getBebidasConsumidasEvento(eventoId) {
+    const pedidos = await db.pedido.where('evento_id').equals(eventoId).toArray();
+    const mapa = new Map();
+    if (pedidos.length === 0) return mapa;
+
+    const ids = pedidos.map(p => p.id);
+    const detalles = await db.detalle_pedido.where('pedido_id').anyOf(ids).toArray();
+
+    detalles.forEach(d => {
+        if (!d.bebida_elegida) return;
+        const drinks = d.bebida_elegida.split(',').map(s => s.trim()).filter(Boolean);
+        // Cada nombre de bebida × cantidad del detalle.
+        // Ej: si pidió 2x "Combo" con "Coca", son 2 Cocas consumidas.
+        drinks.forEach(name => {
+            mapa.set(name, (mapa.get(name) || 0) + d.cantidad);
+        });
+    });
+    return mapa;
+}
+
+// Devuelve un array de objetos con el stock de cada bebida del evento:
+// [{ nombre, inicial, repuesto, total, consumido, restante }]
+async function getStockBebidasEvento(eventoId) {
+    const filas = await db.stock_bebida.where('evento_id').equals(eventoId).toArray();
+    if (filas.length === 0) return [];
+
+    const consumidas = await getBebidasConsumidasEvento(eventoId);
+
+    return filas.map(f => {
+        const inicial = f.cantidad_inicial || 0;
+        const repuesto = f.cantidad_repuesta || 0;
+        const total = inicial + repuesto;
+        const consumido = consumidas.get(f.bebida_nombre) || 0;
+        const restante = total - consumido;
+        return {
+            nombre: f.bebida_nombre,
+            inicial, repuesto, total, consumido, restante
+        };
+    });
 }
