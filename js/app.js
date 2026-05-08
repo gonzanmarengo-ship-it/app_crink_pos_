@@ -109,22 +109,21 @@ async function renderStockIndicator() {
     // de productos categoría Papas activos (en gramos cocidos).
     const papas = allProducts.filter(p => p.categoria === 'Papas' && p.gramaje_papa > 0);
     let porcionesEstimadas = null;
+    const gramosCocidosRestantes = stock.restante * PAPA_RENDIMIENTO_GR_COCIDOS_POR_KG_CRUDO;
     if (papas.length > 0 && stock.restante > 0) {
         const gramajePromedio = papas.reduce((acc, p) => acc + p.gramaje_papa, 0) / papas.length;
-        // restante (kg crudos) → gramos cocidos: × 700 (rendimiento).
-        // La constante ya convierte kg crudos a gramos cocidos directamente.
-        const gramosCocidosRestantes = stock.restante * PAPA_RENDIMIENTO_GR_COCIDOS_POR_KG_CRUDO;
         porcionesEstimadas = Math.floor(gramosCocidosRestantes / gramajePromedio);
     }
+    const kgCocidosRestantes = gramosCocidosRestantes / 1000;
 
     container.className = `stock-indicator ${nivel}`;
     container.style.display = 'block';
     container.innerHTML = `
         <small>🥔 STOCK PAPA</small>
-        <span class="stock-value">${stock.restante.toFixed(2)} kg</span>
+        <span class="stock-value">${kgCocidosRestantes.toFixed(2)} kg cocidos</span>
         <span class="stock-meta">
-            ${porcionesEstimadas !== null ? `≈ ${porcionesEstimadas} porciones` : 'crudos disponibles'}<br>
-            Cargado ${stock.totalCargado.toFixed(1)} · Vendido ${stock.consumido.toFixed(2)}
+            ${porcionesEstimadas !== null ? `≈ ${porcionesEstimadas} porciones` : 'sin porciones'}<br>
+            Cargado ${stock.totalCargado.toFixed(1)} kg crudos
         </span>
         <button id="btn-restock">+ Reponer kilos</button>
     `;
@@ -1948,17 +1947,17 @@ async function renderHistoryStats(eventId) {
 
 function renderStockSection(stock) {
     if (!stock || stock.totalCargado === 0) return '';
-    const sobrante = stock.restante;
-    const colorSobrante = sobrante < 0 ? 'var(--danger)' : 'var(--success)';
+    const sobranteCocidos = stock.restante * PAPA_RENDIMIENTO_GR_COCIDOS_POR_KG_CRUDO / 1000;
+    const colorSobrante = sobranteCocidos < 0 ? 'var(--danger)' : 'var(--success)';
     return `
         <div style="background: var(--bg-card); padding: 20px; border-radius: var(--radius-md); margin-bottom: 20px;">
             <h4 style="margin-bottom: 12px;">🥔 Stock de papa</h4>
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; font-size: 14px;">
-                <div><small style="color: var(--text-secondary);">Inicial</small><br><strong>${stock.inicial.toFixed(2)} kg</strong></div>
-                <div><small style="color: var(--text-secondary);">Repuesto</small><br><strong>${stock.repuesto.toFixed(2)} kg</strong></div>
-                <div><small style="color: var(--text-secondary);">Cargado total</small><br><strong>${stock.totalCargado.toFixed(2)} kg</strong></div>
-                <div><small style="color: var(--text-secondary);">Vendido (crudos eq.)</small><br><strong>${stock.consumido.toFixed(2)} kg</strong></div>
-                <div><small style="color: var(--text-secondary);">Sobrante / faltante</small><br><strong style="color: ${colorSobrante};">${sobrante.toFixed(2)} kg</strong></div>
+                <div><small style="color: var(--text-secondary);">Inicial (crudos)</small><br><strong>${stock.inicial.toFixed(2)} kg</strong></div>
+                <div><small style="color: var(--text-secondary);">Repuesto (crudos)</small><br><strong>${stock.repuesto.toFixed(2)} kg</strong></div>
+                <div><small style="color: var(--text-secondary);">Cargado total (crudos)</small><br><strong>${stock.totalCargado.toFixed(2)} kg</strong></div>
+                <div><small style="color: var(--text-secondary);">Vendido (cocidos eq.)</small><br><strong>${(stock.consumido * PAPA_RENDIMIENTO_GR_COCIDOS_POR_KG_CRUDO / 1000).toFixed(2)} kg</strong></div>
+                <div><small style="color: var(--text-secondary);">Sobrante cocidos</small><br><strong style="color: ${colorSobrante};">${sobranteCocidos.toFixed(2)} kg</strong></div>
             </div>
         </div>
     `;

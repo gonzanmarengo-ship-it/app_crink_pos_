@@ -135,8 +135,8 @@ async function getConfig() {
     return await db.configuracion.get(1);
 }
 
-// Conversión clave del negocio: 1 kg de papa cruda rinde 700 g cocidos.
-const PAPA_RENDIMIENTO_GR_COCIDOS_POR_KG_CRUDO = 700;
+// Conversión clave del negocio: 1 kg de papa cruda rinde 650 g cocidos (merma 35%).
+const PAPA_RENDIMIENTO_GR_COCIDOS_POR_KG_CRUDO = 650;
 
 // Suma todos los gramos cocidos vendidos en un evento (sale de los snapshots
 // históricos de gramaje en cada detalle de pedido).
